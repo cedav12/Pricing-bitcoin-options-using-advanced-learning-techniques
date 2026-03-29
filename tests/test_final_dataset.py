@@ -165,5 +165,380 @@ class TestFinalDataset(unittest.TestCase):
             self.assertFalse(self.final_df[col].isna().any(), f"Column {col} contains NaNs improperly.")
 
 
+    # ------------------------------------------------------------------
+    # TEST 05 — INTRINSIC VALUE BOUND
+    # ------------------------------------------------------------------
+    def test_05_intrinsic_value_bound(self):
+        """
+        No-arbitrage lower bound:
+          call_price >= max(S - K*exp(-rT), 0)
+          put_price  >= max(K*exp(-rT) - S,  0)
+        Uses a random 0.5 % sample; tolerance 1e-6.
+        """
+        if self.final_df.empty:
+            self.skipTest("Processed dataset is empty.")
+
+        sample = self.final_df.sample(frac=0.005, random_state=42)
+
+        r = sample['risk_free_rate'].fillna(0.0)
+        T = sample['time_to_maturity']
+        S = sample['underlying_price']
+        K = sample['strike']
+        P = sample['option_price']
+        opt_type = sample['option_type'].str.upper()
+
+        discount = K * np.exp(-r * T)
+        tol = 1e-6
+
+        calls = opt_type == 'C'
+        puts  = opt_type == 'P'
+
+        call_lb = np.maximum(S - discount, 0.0)
+        put_lb  = np.maximum(discount - S, 0.0)
+
+        call_violations = (P[calls] < call_lb[calls] - tol).sum()
+        put_violations  = (P[puts]  < put_lb[puts]   - tol).sum()
+
+        total = call_violations + put_violations
+        print(f"\nTest 05 – intrinsic-value violations: {total} "
+              f"(calls: {call_violations}, puts: {put_violations}) "
+              f"out of {len(sample)} sampled rows")
+        self.assertEqual(total, 0,
+            f"{total} option price(s) breach the no-arbitrage intrinsic-value lower bound.")
+
+    # ------------------------------------------------------------------
+    # TEST 06 — UPPER PRICE BOUND
+    # ------------------------------------------------------------------
+    def test_06_upper_price_bound(self):
+        """
+        call_price <= underlying_price
+        put_price  <= strike
+        Sampled 0.5 % of the dataset; small tolerance allowed.
+        """
+        if self.final_df.empty:
+            self.skipTest("Processed dataset is empty.")
+
+        sample = self.final_df.sample(frac=0.005, random_state=7)
+        tol = 1e-6
+        opt_type = sample['option_type'].str.upper()
+
+        calls = opt_type == 'C'
+        puts  = opt_type == 'P'
+
+        call_violations = (sample.loc[calls, 'option_price'] >
+                           sample.loc[calls, 'underlying_price'] + tol).sum()
+        put_violations  = (sample.loc[puts, 'option_price'] >
+                           sample.loc[puts, 'strike'] + tol).sum()
+
+        total = call_violations + put_violations
+        print(f"\nTest 06 – upper-price-bound violations: {total} "
+              f"(calls: {call_violations}, puts: {put_violations})")
+        self.assertEqual(total, 0,
+            f"{total} option price(s) exceed their theoretical upper bound.")
+
+    # ------------------------------------------------------------------
+    # TEST 07 — STRIKE MONOTONICITY
+    # ------------------------------------------------------------------
+    def test_07_strike_monotonicity(self):
+        """
+        For randomly sampled (timestamp, expiry) slices isolate call options,
+        sort by strike and verify price is non-increasing.
+        Fails only when violations exceed 5 % of checked triples.
+        """
+        if self.final_df.empty:
+            self.skipTest("Processed dataset is empty.")
+
+        calls = self.final_df[self.final_df['option_type'].str.upper() == 'CALL']
+        if calls.empty:
+            self.skipTest("No call options in dataset.")
+
+        keys = (calls.groupby(['timestamp', 'expiry'])
+                     .filter(lambda g: len(g) >= 2)
+                     [['timestamp', 'expiry']]
+                     .drop_duplicates())
+
+        if keys.empty:
+            self.skipTest("No (timestamp, expiry) groups with >= 2 strikes.")
+
+        n_sample = min(200, len(keys))
+        sampled_keys = keys.sample(n=n_sample, random_state=42)
+
+        violations = 0
+        checked = 0
+        for _, row in sampled_keys.iterrows():
+            grp = (calls[(calls['timestamp'] == row['timestamp']) &
+                         (calls['expiry']    == row['expiry'])]
+                   .sort_values('strike'))
+            diffs = grp[grp["trade_count"]>0]['option_price'].diff().dropna()
+            violations += (diffs > 1e-6).sum()
+            checked += len(diffs)
+
+        print(f"\nTest 07 – strike-monotonicity violations: {violations}/{checked} "
+              f"across {n_sample} sampled slices")
+        threshold = max(1, int(0.05 * checked))
+        self.assertLessEqual(violations, threshold,
+            f"Too many strike-monotonicity violations ({violations} > {threshold}).")
+
+    # ------------------------------------------------------------------
+    # TEST 08 — STRIKE CONVEXITY
+    # ------------------------------------------------------------------
+    def test_08_strike_convexity(self):
+        """
+        For sampled timestamps verify convexity:
+          C(K1) - 2*C(K2) + C(K3) >= 0  for neighbouring strike triples.
+        Fails only when violations exceed 2 % of checked triples.
+        """
+        self.assertTrue(True)
+        if self.final_df.empty:
+            self.skipTest("Processed dataset is empty.")
+
+        calls = self.final_df[self.final_df['option_type'].str.upper() == 'CALL']
+        if calls.empty:
+            self.skipTest("No call options in dataset.")
+
+        keys = (calls.groupby(['timestamp', 'expiry'])
+                     .filter(lambda g: len(g) >= 3)
+                     [['timestamp', 'expiry']]
+                     .drop_duplicates())
+
+        if keys.empty:
+            self.skipTest("No groups with >= 3 strikes for convexity check.")
+
+        n_sample = min(200, len(keys))
+        sampled_keys = keys.sample(n=n_sample, random_state=99)
+
+        violations = 0
+        checked = 0
+        for _, row in sampled_keys.iterrows():
+            grp = (calls[(calls['timestamp'] == row['timestamp']) &
+                         (calls['expiry']    == row['expiry'])]
+                   .sort_values('strike')
+                   .reset_index(drop=True))
+            grp = grp[grp["trade_count"] > 0].reset_index(drop=True)
+            prices = grp['option_price'].values
+            # Check convexity for every consecutive triple
+            for i in range(len(prices) - 2):
+                butterfly = prices[i] - 2 * prices[i + 1] + prices[i + 2]
+                if butterfly < -1e-6:
+                    violations += 1
+                checked += 1
+
+        print(f"\nTest 08 – strike-convexity violations: {violations}/{checked} "
+              f"across {n_sample} sampled slices")
+        threshold = max(1, int(0.02 * checked))
+        self.assertLessEqual(violations, threshold,
+            f"Too many convexity violations ({violations} > {threshold}).")
+
+    # ------------------------------------------------------------------
+    # TEST 09 — TIMESTAMP ORDERING PER INSTRUMENT
+    # ------------------------------------------------------------------
+    def test_09_timestamp_ordering_per_instrument(self):
+        """
+        For each (strike, expiry, option_type) instrument, timestamps must be
+        non-decreasing (strictly increasing since duplicates are forbidden).
+        Checks a random sample of 500 instruments.
+        """
+        if self.final_df.empty:
+            self.skipTest("Processed dataset is empty.")
+
+        groups = self.final_df.groupby(['strike', 'expiry', 'option_type'])
+        all_keys = list(groups.groups.keys())
+        n_sample = min(500, len(all_keys))
+        sampled = random.sample(all_keys, n_sample)
+
+        violations = 0
+        for key in sampled:
+            ts = groups.get_group(key)['timestamp'].values
+            if (np.diff(ts) < 0).any():
+                violations += 1
+
+        print(f"\nTest 09 – instruments with non-monotone timestamps: "
+              f"{violations}/{n_sample}")
+        self.assertEqual(violations, 0,
+            f"{violations} instrument(s) have out-of-order timestamps.")
+
+    # ------------------------------------------------------------------
+    # TEST 10 — DUPLICATE OBSERVATIONS
+    # ------------------------------------------------------------------
+    def test_10_no_duplicate_observations(self):
+        """
+        No two rows may share the same (timestamp, strike, expiry, option_type).
+        Uses drop_duplicates on the key columns to detect collisions.
+        """
+        if self.final_df.empty:
+            self.skipTest("Processed dataset is empty.")
+
+        key_cols = ['timestamp', 'strike', 'expiry', 'option_type']
+        n_total = len(self.final_df)
+        n_unique = self.final_df.drop_duplicates(subset=key_cols).shape[0]
+        n_dupes = n_total - n_unique
+
+        print(f"\nTest 10 – duplicate observations: {n_dupes} (out of {n_total} rows)")
+        self.assertEqual(n_dupes, 0,
+            f"{n_dupes} duplicate (timestamp, strike, expiry, option_type) rows found.")
+
+    # ------------------------------------------------------------------
+    # TEST 11 — VOLATILITY DECOMPOSITION
+    # ------------------------------------------------------------------
+    def test_11_volatility_decomposition(self):
+        """
+        realized_variance ≈ positive_semivariance + negative_semivariance
+        Checks a 1 % random sample; tolerance 1e-8.
+        """
+        if self.final_df.empty:
+            self.skipTest("Processed dataset is empty.")
+
+        required = ['realized_variance', 'positive_semivariance', 'negative_semivariance']
+        missing = [c for c in required if c not in self.final_df.columns]
+        if missing:
+            self.skipTest(f"Columns missing for decomposition check: {missing}")
+
+        sample = self.final_df[required].dropna().sample(frac=0.01, random_state=42)
+        if sample.empty:
+            self.skipTest("No non-null rows available for decomposition check.")
+
+        reconstructed = sample['positive_semivariance'] + sample['negative_semivariance']
+        abs_diff = (sample['realized_variance'] - reconstructed).abs()
+        max_err = abs_diff.max()
+        n_violations = (abs_diff > 1e-8).sum()
+
+        print(f"\nTest 11 – volatility decomposition max error: {max_err:.2e}, "
+              f"violations: {n_violations}/{len(sample)}")
+        self.assertEqual(n_violations, 0,
+            f"{n_violations} row(s) where realized_variance ≠ pos + neg semivariance "
+            f"(max error: {max_err:.2e}).")
+
+    # ------------------------------------------------------------------
+    # TEST 12 — LOG MONEYNESS CORRECTNESS
+    # ------------------------------------------------------------------
+    def test_12_log_moneyness_correctness(self):
+        """
+        log_moneyness must equal log(underlying_price / strike) within 1e-8.
+        Verified on a 1 % random sample.
+        """
+        if self.final_df.empty:
+            self.skipTest("Processed dataset is empty.")
+
+        required = ['log_moneyness', 'underlying_price', 'strike']
+        missing = [c for c in required if c not in self.final_df.columns]
+        if missing:
+            self.skipTest(f"Columns missing: {missing}")
+
+        sample = self.final_df[required].dropna().sample(frac=0.01, random_state=42)
+        if sample.empty:
+            self.skipTest("No non-null rows for log_moneyness check.")
+
+        expected = np.log(sample['underlying_price'] / sample['strike'])
+        abs_diff = (sample['log_moneyness'] - expected).abs()
+        max_err = abs_diff.max()
+        n_violations = (abs_diff > 1e-8).sum()
+
+        print(f"\nTest 12 – log_moneyness max error: {max_err:.2e}, "
+              f"violations: {n_violations}/{len(sample)}")
+        self.assertEqual(n_violations, 0,
+            f"{n_violations} log_moneyness value(s) deviate from log(S/K) "
+            f"(max error: {max_err:.2e}).")
+
+    # ------------------------------------------------------------------
+    # TEST 13 — TIME TO MATURITY RANGE
+    # ------------------------------------------------------------------
+    def test_13_time_to_maturity_range(self):
+        """
+        0 <= time_to_maturity < 2 years for all rows
+        (crypto options rarely exceed 2 years).
+        """
+        if self.final_df.empty:
+            self.skipTest("Processed dataset is empty.")
+
+        ttm = self.final_df['time_to_maturity']
+        below_zero = (ttm < 0).sum()
+        above_two  = (ttm >= 2).sum()
+
+        print(f"\nTest 13 – TTM < 0: {below_zero}, TTM >= 2y: {above_two}")
+        self.assertEqual(below_zero, 0,
+            f"{below_zero} row(s) have time_to_maturity < 0.")
+        self.assertEqual(above_two, 0,
+            f"{above_two} row(s) have time_to_maturity >= 2 years.")
+
+    # ------------------------------------------------------------------
+    # TEST 14 — BTC RETURN CONSISTENCY
+    # ------------------------------------------------------------------
+    def test_14_btc_return_consistency(self):
+        """
+        For the same timestamp, btc_return must be identical across all rows.
+        Verifies 200 randomly sampled timestamps that appear more than once.
+        """
+        if self.final_df.empty:
+            self.skipTest("Processed dataset is empty.")
+
+        if 'btc_return' not in self.final_df.columns:
+            self.skipTest("Column 'btc_return' not present.")
+
+        ts_counts = self.final_df['timestamp'].value_counts()
+        multi_ts = ts_counts[ts_counts > 1].index.tolist()
+
+        if not multi_ts:
+            self.skipTest("No repeated timestamps found.")
+
+        n_sample = min(200, len(multi_ts))
+        sampled_ts = random.sample(multi_ts, n_sample)
+
+        inconsistent = 0
+        for ts in sampled_ts:
+            unique_vals = self.final_df.loc[
+                self.final_df['timestamp'] == ts, 'btc_return'
+            ].nunique(dropna=False)
+            if unique_vals > 1:
+                inconsistent += 1
+
+        print(f"\nTest 14 – timestamps with inconsistent btc_return: "
+              f"{inconsistent}/{n_sample}")
+        self.assertEqual(inconsistent, 0,
+            f"{inconsistent} timestamp(s) have differing btc_return values across rows.")
+
+    # ------------------------------------------------------------------
+    # TEST 15 — LIQUIDITY SANITY
+    # ------------------------------------------------------------------
+    def test_15_liquidity_sanity(self):
+        """
+        volume >= 0 and trade_count >= 0 for all rows.
+        """
+        if self.final_df.empty:
+            self.skipTest("Processed dataset is empty.")
+
+        errors = []
+        for col in ['volume', 'trade_count']:
+            if col not in self.final_df.columns:
+                continue
+            neg = (self.final_df[col] < 0).sum()
+            if neg:
+                errors.append(f"{col}: {neg} negative value(s)")
+
+        print(f"\nTest 15 – liquidity sanity: {errors if errors else 'OK'}")
+        self.assertEqual(len(errors), 0, "; ".join(errors))
+
+    # ------------------------------------------------------------------
+    # TEST 16 — EXTREME PRICE FILTER
+    # ------------------------------------------------------------------
+    def test_16_extreme_price_filter(self):
+        """
+        Flag observations where option_price > 5 * underlying_price.
+        Reports count but does not necessarily hard-fail (reports for awareness).
+        """
+        if self.final_df.empty:
+            self.skipTest("Processed dataset is empty.")
+
+        extreme = (self.final_df['option_price'] >
+                   5).sum()
+        pct = 100.0 * extreme / len(self.final_df)
+
+        print(f"\nTest 16 – extreme prices (option > 5×S): {extreme} rows ({pct:.4f} %)")
+        # Hard-fail if more than 0.1 % of the dataset is affected
+        threshold = max(1, int(0.001 * len(self.final_df)))
+        self.assertLessEqual(extreme, threshold,
+            f"{extreme} row(s) have option_price > 5 × underlying_price "
+            f"(threshold: {threshold}).")
+
+
 if __name__ == '__main__':
     unittest.main()

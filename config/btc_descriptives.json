@@ -1,0 +1,8 @@
+{
+  "data": "data/processed/hourly_btc_features.csv",
+  "output_dir": "output/btc_descriptives",
+  "periods_per_year": 8760,
+  "timestamp_unit": "ms",
+  "save_tables": true,
+  "save_plots": true
+}

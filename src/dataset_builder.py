@@ -1,4 +1,6 @@
 import os
+import sys
+
 import pandas as pd
 from src.data_loader import DataLoader
 from src.feature_engineering import compute_time_to_maturity, compute_log_moneyness
@@ -30,7 +32,8 @@ class DatasetBuilder:
         # Ensure timestamp is the same type
         hourly_btc_features['timestamp'] = pd.to_numeric(hourly_btc_features['timestamp'])
         hourly_btc_features = hourly_btc_features.sort_values('timestamp')
-        
+        hourly_btc_features.to_csv(os.path.join(self.processed_data_dir, "hourly_btc_features.csv"), index=False)
+
         print("Downloading and preparing macro data...")
         
         min_ts = pd.to_datetime(hourly_btc_features['timestamp'].min(), unit='ms')
