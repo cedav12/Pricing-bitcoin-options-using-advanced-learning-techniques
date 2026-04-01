@@ -38,34 +38,43 @@ Processes raw CSVs from `data/raw/`, aligns timestamps, and produces a consolida
 python3 main.py --mode build_dataset
 ```
 
-### 2. Black-Scholes Benchmarking
+### 2. Model Evaluation (Two-Stage Pipeline)
 
-The benchmarking pipeline is split into two stages for scalability:
+The benchmarking pipeline is split into a pure pricing phase and a model-agnostic evaluate phase:
 
-**Stage 1: Pricing & IV Inversion**
-Computes theoretical prices and implied volatility for the entire dataset. Results are saved to `data/processed/options_with_bs.csv`.
+**Stage 1: Pricing**
+Computes predictions for the dataset. Results are saved to `data/processed/predictions_bs.csv`.
 ```bash
 python3 main.py --mode bs_pricing --volatility rolling_std_24h
 ```
 
-**Stage 2: Analysis & Visualization**
-Generates statistics (MAE, RMSE, R², Bias, etc.) and diagnostic plots from the precomputed dataset.
+**Stage 2: Model-Agnostic Evaluation**
+Generates segmented statistics (MAE, RMSE, MAPE, Bias, R²) and diagnostic plots/heatmaps.
 ```bash
-python3 main.py --mode bs_analysis
+# Evaluate CALL options (Default)
+python3 main.py --mode evaluate_model --input data/processed/predictions_bs.csv --option-filter call
+
+# Evaluate PUT options
+python3 main.py --mode evaluate_model --input data/processed/predictions_bs.csv --option-filter put
+
+# Evaluate BOTH options
+python3 main.py --mode evaluate_model --input data/processed/predictions_bs.csv --option-filter both
 ```
 
-*Note: Use `--sample-size N` to limit rows for faster testing.*
+*Note: Use `--sample-size N` to limit rows and test quickly.*
 
 ## Project Structure
 
 - `src/`: Core implementation logic.
-  - `black_scholes.py`: Optimized vectorized pricer and benchmarking engine.
+  - `models/black_scholes.py`: Pure, high-performance Black-Scholes math.
+  - `pipelines/bs_pricing.py`: Data pipeline generating model predictions.
+  - `evaluation/model_evaluation.py`: Model-agnostic statistical evaluator and plotter.
   - `btc_feature_engineering.py`: Volatility and return feature generation.
   - `dataset_builder.py`: Data alignment and merging pipeline.
 - `tests/`: Unittest suite.
   - `test_core_logic.py`: Mathematics and basic feature checks.
   - `test_final_dataset.py`: Large-scale data integrity and no-arbitrage checks.
-- `output/`: Generated stats, plots, and benchmark results.
+- `output/`: Generated stats, plots, and benchmark evaluation results (CSV + PNG).
 
 ## Testing
 
