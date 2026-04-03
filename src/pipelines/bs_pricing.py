@@ -20,6 +20,7 @@ class BlackScholesPipeline:
         vol_column: str = "rolling_std_24h",
         chunksize: int = 500_000,
         sample_size: Optional[int] = None,
+        scale_volatility: bool = False,
     ):
         """
         Compute BS prices and save to predictions_bs.csv.
@@ -37,6 +38,7 @@ class BlackScholesPipeline:
         if os.path.exists(output_path):
             os.remove(output_path)
 
+
         loaded_total = 0
         first_chunk = True
 
@@ -53,6 +55,9 @@ class BlackScholesPipeline:
             if "risk_free_rate" not in chunk.columns:
                 chunk["risk_free_rate"] = 0.0
             chunk["risk_free_rate"] = chunk["risk_free_rate"].fillna(0.0)
+            #scale_volatility = True
+            if scale_volatility:
+                chunk[vol_column] = chunk[vol_column].fillna(0.0) * np.sqrt(365 * 24)
 
             # Drop missing essential values
             mask = (

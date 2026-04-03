@@ -28,9 +28,10 @@ ENV/
 
 # Data files (large / raw data — keep only processed artifacts if needed)
 data/
+config/
 
 # Model checkpoints & outputs
-models/
+output/
 checkpoints/
 *.h5
 *.pkl

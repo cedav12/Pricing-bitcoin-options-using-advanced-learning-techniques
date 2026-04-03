@@ -18,7 +18,7 @@ class TestFinalDataset(unittest.TestCase):
     def setUpClass(cls):
         # Paths can be modified if running from a different root or custom folders
         cls.raw_data_dir = "data/raw"
-        cls.processed_data_path = "data/processed/options_dataset.csv"
+        cls.processed_data_path = "data/processed/options_dataset_filtered.csv"
         
         # We only load these if the processed dataset exists, otherwise tests will just fail/skip gracefully
         if os.path.exists(cls.processed_data_path):

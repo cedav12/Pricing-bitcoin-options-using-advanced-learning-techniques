@@ -33,4 +33,10 @@ def preprocess_dataset(df: pd.DataFrame, option_filter: str = "call") -> pd.Data
         intrinsic_btc = intrinsic_usd / df["underlying_price"]
         df["time_value"] = df["market_price"] - intrinsic_btc
 
+    if "market_price_usd" not in df.columns:
+        df["market_price_usd"] = df["market_price"] * df["underlying_price"]
+
+    if "model_price_usd" not in df.columns and "model_price" in df.columns:
+        df["model_price_usd"] = df["model_price"] * df["underlying_price"]
+
     return df

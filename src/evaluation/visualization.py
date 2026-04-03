@@ -54,27 +54,31 @@ def generate_diagnostic_plots(
     
     # Plot 1: Market vs Model (Log-Log)
     ax1 = fig.add_subplot(2, 3, 1)
-    ax1.scatter(df_scatter["market_price"], df_scatter["model_price"], alpha=0.1, s=2)
-    mmax = max(df_scatter["market_price"].max(), df_scatter["model_price"].max())
-    mmin = min(df_scatter["market_price"].min(), df_scatter["model_price"].min())
-    if mmin <= 0: mmin = 1e-4
-    ax1.plot([mmin, mmax], [mmin, mmax], "r--")
-    ax1.set_xscale("log")
-    ax1.set_yscale("log")
+    df_log = df_scatter[(df_scatter["market_price"] > min_price) & (df_scatter["model_price"] > min_price)]
+    if not df_log.empty:
+        ax1.scatter(df_log["market_price"], df_log["model_price"], alpha=0.1, s=2)
+        mmax = max(df_log["market_price"].max(), df_log["model_price"].max())
+        mmin = min(df_log["market_price"].min(), df_log["model_price"].min())
+        if mmin <= 0:
+            mmin = 1e-4
+        ax1.plot([mmin, mmax], [mmin, mmax], "r--")
+        ax1.set_xscale("log")
+        ax1.set_yscale("log")
+    else:
+        ax1.text(0.5, 0.5, "Insufficient positive-price data", ha='center')
     ax1.set_xlabel("Market Price (BTC)")
     ax1.set_ylabel("Model Price (BTC)")
     ax1.set_title("Market vs Model (Log-Log)")
-    
+
     # Plot 2: Error Distribution
     ax2 = fig.add_subplot(2, 3, 2)
     errors = df_plot[err_col].dropna()
-    # Clip extreme outliers globally for the histogram to keep it readable
     q_low, q_high = errors.quantile(0.01), errors.quantile(0.99)
     hist_data = errors[(errors >= q_low) & (errors <= q_high)]
     ax2.hist(hist_data, bins=50, color='skyblue', edgecolor='black')
     ax2.axvline(0, color='r', linestyle='--')
     ax2.set_title(f"{error_type.capitalize()} Error Distribution (1st-99th %ile)")
-    
+
     # Plot 3: Error vs Moneyness
     ax3 = fig.add_subplot(2, 3, 3)
     ax3.scatter(df_scatter["log_moneyness"], df_scatter[err_col], alpha=0.1, s=2)
@@ -82,7 +86,7 @@ def generate_diagnostic_plots(
     ax3.set_xlabel("Log Moneyness")
     ax3.set_ylabel(f"{error_type.capitalize()} Error")
     ax3.set_title("Error vs Moneyness")
-    
+
     # Plot 4: Error vs Maturity
     ax4 = fig.add_subplot(2, 3, 4)
     ax4.scatter(df_scatter["time_to_maturity"], df_scatter[err_col], alpha=0.1, s=2)
@@ -96,10 +100,10 @@ def generate_diagnostic_plots(
     if "seg_maturity" in df_plot.columns and "seg_moneyness" in df_plot.columns:
         heat_df = df_plot.copy()
         heat_df["abs_err"] = np.abs(heat_df[err_col])
-        heatmap_data = heat_df.groupby(["seg_maturity", "seg_moneyness"], observed=False)["abs_err"].mean()
+        heatmap_data = heat_df.groupby(["seg_maturity", "seg_moneyness"], observed=False)["abs_err"].median()
         heatmap_data = heatmap_data.unstack(level="seg_moneyness")
         sns.heatmap(heatmap_data, annot=True, fmt=".4f", cmap="YlOrRd", ax=ax5)
-        ax5.set_title(f"Mean Abs {error_type.capitalize()} Error")
+        ax5.set_title(f"Median Abs {error_type.capitalize()} Error")
         ax5.set_ylabel("Maturity")
         ax5.set_xlabel("Moneyness")
     else:
@@ -117,8 +121,26 @@ def generate_diagnostic_plots(
         ax6.text(0.5, 0.5, "Price Segment Not Computed", ha='center')
 
     fig.tight_layout(rect=[0, 0.03, 1, 0.95])
-    
+
     file_path = os.path.join(out_dir, f"{error_type}_diagnostics.png")
     plt.savefig(file_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"[Visualization] Saved {file_path}")
+
+    # Additional Plot: Absolute Error vs Price (Log-Log)
+    fig2, ax = plt.subplots(figsize=(6, 4))
+    df_err = df_scatter[(df_scatter["market_price"] > min_price) & (np.abs(df_scatter[err_col]) > 1e-12)]
+    if not df_err.empty:
+        ax.scatter(df_err["market_price"], np.abs(df_err[err_col]), alpha=0.1, s=2)
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+    else:
+        ax.text(0.5, 0.5, "Insufficient positive-price data", ha='center')
+    ax.set_title(f"Absolute {error_type.capitalize()} Error vs Price (log-log)")
+    ax.set_xlabel("Market Price")
+    ax.set_ylabel(f"Absolute {error_type.capitalize()} Error")
+    plt.tight_layout()
+    file_path2 = os.path.join(out_dir, f"{error_type}_error_vs_price.png")
+    plt.savefig(file_path2, dpi=150, bbox_inches="tight")
+    plt.close(fig2)
+    print(f"[Visualization] Saved {file_path2}")
