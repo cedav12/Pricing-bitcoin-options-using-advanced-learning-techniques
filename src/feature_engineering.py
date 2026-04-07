@@ -16,8 +16,8 @@ def compute_time_to_maturity(timestamps: pd.Series, expiries: pd.Series) -> pd.S
         if isinstance(first_val, (int, float, np.integer, np.floating)) and first_val > 1e11:
             is_unix_ms = True
             
-    timestamps_dt = pd.to_datetime(timestamps, unit='ms' if is_unix_ms else None)
-    expiries_dt = pd.to_datetime(expiries)
+    timestamps_dt = pd.to_datetime(timestamps, unit='ms' if is_unix_ms else None, utc=True)
+    expiries_dt = pd.to_datetime(expiries, utc=True) + pd.Timedelta(hours=8) # Delivery is 8:00 UTC, given day
     
     # Calculate difference in seconds and convert to years (365 days)
     # Using 365.25 for leap years approximation, or simply 365.
