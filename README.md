@@ -30,51 +30,57 @@ pip install -r requirements.txt
 
 ## Usage
 
+The project relies heavily on a central CLI and JSON configurations. The `--mode` argument drives the entry point, while `--config` points to optional JSON overrides for parameters.
+
 ### 1. Build the Dataset
-
 Processes raw CSVs from `data/raw/`, aligns timestamps, and produces a consolidated dataset.
-
 ```bash
 python3 main.py --mode build_dataset
 ```
 
-### 2. Model Evaluation (Two-Stage Pipeline)
+### 2. Dataset Descriptives & Analysis
+Audit and analyze the generated options dataset for liquidity, trade characteristics, and model readiness:
+```bash
+python3 main.py --mode dataset_descriptives --config config/dataset_descriptives.json
+```
 
+### 3. Filter Dataset
+Applies configurable criteria (e.g., call-only, minimum trade counts, negative time value checks) keeping rigorous summary drops:
+```bash
+python3 main.py --mode filter_dataset --config config/filter_dataset.json
+```
+
+### 4. Model Evaluation (Two-Stage Pipeline)
 The benchmarking pipeline is split into a pure pricing phase and a model-agnostic evaluate phase:
 
 **Stage 1: Pricing**
-Computes predictions for the dataset. Results are saved to `data/processed/predictions_bs.csv`.
+Computes Black-Scholes predictions using a specified volatility column. 
 ```bash
-python3 main.py --mode bs_pricing --volatility rolling_std_24h
+python3 main.py --mode bs_pricing --config config/bs_pricing.json
 ```
 
 **Stage 2: Model-Agnostic Evaluation**
-Generates segmented statistics (MAE, RMSE, MAPE, Bias, R²) and diagnostic plots/heatmaps.
+Generates segmented statistics (MAE, RMSE, MAPE, Bias, R²) and diagnostic heatmaps over prediction sets.
 ```bash
-# Evaluate CALL options (Default)
-python3 main.py --mode evaluate_model --input data/processed/predictions_bs.csv --option-filter call
-
-# Evaluate PUT options
-python3 main.py --mode evaluate_model --input data/processed/predictions_bs.csv --option-filter put
-
-# Evaluate BOTH options
-python3 main.py --mode evaluate_model --input data/processed/predictions_bs.csv --option-filter both
+python3 main.py --mode evaluate_model --config config/evaluate_model.json
 ```
 
-*Note: Use `--sample-size N` to limit rows and test quickly.*
+*Note: Use `--sample-size N` to limit rows and test quickly for any mode.*
 
 ## Project Structure
 
 - `src/`: Core implementation logic.
+  - `dataset_builder.py`: Data alignment and merging pipeline.
+  - `dataset_filter.py`: Quality filtration engine dropping arbitrary rows.
+  - `btc_feature_engineering.py`: Volatility and return feature generation.
+  - `btc_descriptives.py`: Macro-oriented timeseries diagnostics.
+  - `analysis/dataset_descriptives.py`: Metric reporting matrices and trade distribution layers.
   - `models/black_scholes.py`: Pure, high-performance Black-Scholes math.
   - `pipelines/bs_pricing.py`: Data pipeline generating model predictions.
   - `evaluation/model_evaluation.py`: Model-agnostic statistical evaluator and plotter.
-  - `btc_feature_engineering.py`: Volatility and return feature generation.
-  - `dataset_builder.py`: Data alignment and merging pipeline.
-- `tests/`: Unittest suite.
-  - `test_core_logic.py`: Mathematics and basic feature checks.
-  - `test_final_dataset.py`: Large-scale data integrity and no-arbitrage checks.
-- `output/`: Generated stats, plots, and benchmark evaluation results (CSV + PNG).
+- `config/`: Configuration JSONs matching explicitly to the `--mode` arguments.
+- `tests/`: Unittest suite covering math, integrity, and limits.
+- `output/`: Generated stats, CSV tables, plots, and evaluation results.
 
 ## Testing
 
