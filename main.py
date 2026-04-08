@@ -171,22 +171,5 @@ def main():
 
 
 if __name__ == "__main__":
-    import pandas as pd
-
-    paths = [
-        "data/processed/options_dataset_filtered.csv",
-        "data/processed/options_dataset_filtered_v2.csv",
-        "data/processed/options_dataset_filtered_ttm_uncorrected.csv",
-    ]
-
-    for path in paths:
-        df = pd.read_csv(path)
-
-        if len(df.columns) > 0 and df.columns[0] == "Unnamed: 0":
-            df = df.iloc[:, 1:]
-            df.to_csv(path, index=False)
-            print(f"Removed first column 'Unnamed: 0' and saved: {path}")
-        else:
-            print(f"First column is not 'Unnamed: 0' in: {path}")
-    #main()
+    main()
 
