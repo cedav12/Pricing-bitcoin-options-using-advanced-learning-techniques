@@ -28,6 +28,7 @@ ENV/
 
 # Data files (large / raw data — keep only processed artifacts if needed)
 data/
+docs/
 config/
 
 # Model checkpoints & outputs

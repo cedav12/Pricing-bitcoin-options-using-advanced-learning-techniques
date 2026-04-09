@@ -14,6 +14,7 @@ import argparse
 
 from src.dataset_builder import DatasetBuilder
 from src.btc_descriptives import BTCDescriptiveAnalyzer
+from src.pipelines.ann_pricing import ANNDatasetPipeline
 from src.pipelines.bs_pricing import BlackScholesPipeline
 from src.evaluation.model_evaluation import ModelEvaluator
 from src.analysis.dataset_descriptives import run_descriptives_pipeline
@@ -56,7 +57,7 @@ def main():
 
     parser.add_argument(
         "--mode", type=str, required=True,
-        choices=["build_dataset", "bs_pricing", "evaluate_model", "btc_descriptives", "dataset_descriptives", "filter_dataset"],
+        choices=["build_dataset", "bs_pricing", "evaluate_model", "btc_descriptives", "dataset_descriptives", "filter_dataset", "ann_dataset"],
         help=(
             "Execution mode:\n"
             "  build_dataset        – run the raw-data processing pipeline\n"
@@ -65,6 +66,7 @@ def main():
             "  btc_descriptives     – run BTC price analysis\n"
             "  dataset_descriptives – run options dataset metrics and diagnostics\n"
             "  filter_dataset       – flexible config-based dataset filtration\n"
+            "  ann_dataset          – verify PyTorch dataset preparation\n"
         ),
     )
 
@@ -167,6 +169,11 @@ def main():
     elif args.mode == "filter_dataset":
         print("Starting dataset filtration pipeline...")
         pipeline = DatasetFilterPipeline(mode_config)
+        pipeline.run()
+
+    # ── ann_dataset ──────────────────────────────────────────────────────────
+    elif args.mode == "ann_dataset":
+        pipeline = ANNDatasetPipeline(mode_config)
         pipeline.run()
 
 
