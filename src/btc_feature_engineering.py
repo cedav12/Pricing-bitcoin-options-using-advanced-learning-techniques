@@ -134,7 +134,7 @@ def preprocess_btc_data(btc_df: pd.DataFrame) -> pd.DataFrame:
     
     # Fit GARCH(1,1) and extract conditional volatility
     # Use btc_return (which is already log return)
-    # arch module prefers scaled returns (x100) for optimization convergence, so we multiply by 100 before fitting
+    # arch dataset prefers scaled returns (x100) for optimization convergence, so we multiply by 100 before fitting
     # then divide by 100 after.
     returns_for_garch = hourly_df['btc_return'] * 100.0
     

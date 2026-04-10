@@ -4,13 +4,13 @@ from typing import Any, Dict
 
 import torch
 
-from src.models.ann.preprocessing import prepare_ann_dataframe
-from src.models.ann.dataset import BitcoinOptionsDataset
-from src.models.ann.dataloaders import build_dataloader
+from src.models.ann.dataset.preprocessing import prepare_ann_dataframe
+from src.models.ann.dataset.split_manager import ModularSplitManager
+from src.models.ann.dataset.dataloaders import build_dataloader
 
 
 class ANNDatasetPipeline:
-    """Pipeline wrapper for ANN dataset validation and initialization.
+    """Pipeline wrapper for Modular ANN dataset validation and initialization.
 
     This keeps the ANN dataset preparation flow aligned with the structure of
     other project pipelines: configuration is injected once through the
@@ -29,7 +29,7 @@ class ANNDatasetPipeline:
         return dtype_map.get(dtype_str, torch.float32)
 
     def run(self) -> None:
-        print("Starting PyTorch ANN Dataset validation...")
+        print("Starting Modular PyTorch Dataset validation...")
 
         # 1. Preprocess source dataframe according to config
         df = prepare_ann_dataframe(self.config)
@@ -41,27 +41,31 @@ class ANNDatasetPipeline:
         batch_size = self.config.get("batch_size", 1024)
         dtype = self._resolve_dtype()
 
-        # 2. Build dataset instance
-        dataset = BitcoinOptionsDataset(
-            dataframe=df,
+        # 2. Chronological PyTorch Dataset Management
+        split_manager = ModularSplitManager(
+            df=df,
             feature_columns=features,
             target_column=target,
-            metadata_columns=metadata,
-            return_metadata=return_metadata,
-            dtype=dtype,
+            module_columns=["mon_bin", "ttm_bin"],
+            timestamp_column="timestamp",
+            metadata_columns=metadata
         )
 
-        print("\n[ Diagnostics ]")
-        print(f"Total verified dataset rows: {len(dataset)}")
-        print(f"Number of feature columns: {len(features)}")
-        print(f"Target column: {target}")
-        print(f"Metadata variables included: {'Yes' if return_metadata else 'No'}")
+        print("\n[ Module Diagnostics ]")
+        print(split_manager.get_diagnostics())
 
-        # 3. Validate single sample output
-        sample = dataset[0]
+        # 3. Validation Sampling Output Shape Verification (taking first valid dataset)
+        first_mod_id = list(split_manager.modules.keys())[0]
+        first_module = split_manager.modules[first_mod_id]
+
+        # Create datasets mapping specific module boundaries dynamically
+        train_ds, val_ds, test_ds = first_module.as_datasets(return_metadata=return_metadata, dtype=dtype)
+
+        print(f"\n[ Sample Shapes: {first_mod_id} Train Set ]")
+        sample = train_ds[0]
         if return_metadata:
             print(
-                "Single sample shapes: "
+                f"Single sample shapes: "
                 f"X={sample[0].shape}, "
                 f"Y={sample[1].shape}, "
                 f"Meta dict items={len(sample[2])}"
@@ -69,9 +73,9 @@ class ANNDatasetPipeline:
         else:
             print(f"Single sample shapes: X={sample[0].shape}, Y={sample[1].shape}")
 
-        # 4. Validate batch output
+        # 4. Validate batch output structures natively iterating custom sequences 
         loader = build_dataloader(
-            dataset=dataset,
+            dataset=train_ds,
             batch_size=batch_size,
             shuffle=False,
         )
@@ -87,4 +91,4 @@ class ANNDatasetPipeline:
         else:
             print(f"Single batch shapes: X={batch[0].shape}, Y={batch[1].shape}")
 
-        print("\nANN Dataset successfully verified and initialized cleanly!")
+        print("\nModular ANN Dataset successfully verified and initialized cleanly!")
