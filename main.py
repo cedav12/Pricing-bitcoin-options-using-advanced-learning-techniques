@@ -19,6 +19,8 @@ from src.pipelines.bs_pricing import BlackScholesPipeline
 from src.evaluation.model_evaluation import ModelEvaluator
 from src.analysis.dataset_descriptives import run_descriptives_pipeline
 from src.dataset_filter import DatasetFilterPipeline
+from src.pipelines.ann_train import ANNTrainPipeline
+from src.pipelines.ann_predict import ANNPredictPipeline
 
 SUPPORTED_VOL_COLUMNS = [
     "rolling_std_24h", "rolling_std_7d",
@@ -57,7 +59,7 @@ def main():
 
     parser.add_argument(
         "--mode", type=str, required=True,
-        choices=["build_dataset", "bs_pricing", "evaluate_model", "btc_descriptives", "dataset_descriptives", "filter_dataset", "ann_dataset"],
+        choices=["build_dataset", "bs_pricing", "evaluate_model", "btc_descriptives", "dataset_descriptives", "filter_dataset", "ann_dataset", "ann_train", "ann_predict"],
         help=(
             "Execution mode:\n"
             "  build_dataset        – run the raw-data processing pipeline\n"
@@ -67,6 +69,8 @@ def main():
             "  dataset_descriptives – run options dataset metrics and diagnostics\n"
             "  filter_dataset       – flexible config-based dataset filtration\n"
             "  ann_dataset          – verify PyTorch dataset preparation\n"
+            "  ann_train            – run modular ANN training pipeline\n"
+            "  ann_predict          – run modular ANN inference pipeline\n"
         ),
     )
 
@@ -84,6 +88,8 @@ def main():
         return config_dict.get(key, default)
 
     mode_config = load_mode_config(args.config, args.mode) if args.mode != "btc_descriptives" else {}
+    if args.sample_size is not None:
+        mode_config["sample_size"] = args.sample_size
 
     # ── build_dataset ────────────────────────────────────────────────────────
     if args.mode == "build_dataset":
@@ -174,6 +180,16 @@ def main():
     # ── ann_dataset ──────────────────────────────────────────────────────────
     elif args.mode == "ann_dataset":
         pipeline = ANNDatasetPipeline(mode_config)
+        pipeline.run()
+
+    # ── ann_train ────────────────────────────────────────────────────────────
+    elif args.mode == "ann_train":
+        pipeline = ANNTrainPipeline(mode_config)
+        pipeline.run()
+
+    # ── ann_predict ──────────────────────────────────────────────────────────
+    elif args.mode == "ann_predict":
+        pipeline = ANNPredictPipeline(mode_config)
         pipeline.run()
 
 
