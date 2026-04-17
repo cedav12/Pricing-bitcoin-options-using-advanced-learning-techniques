@@ -2,113 +2,313 @@ import unittest
 import pandas as pd
 import numpy as np
 import torch
+import os
+import tempfile
+import shutil
 
 from src.models.ann.dataset.container import PreparedTabularData
 from src.models.ann.dataset.dataset import TabularDatasetWrapper
 from src.models.ann.dataset.split_manager import ModularSplitManager
+from src.models.ann.dataset.preprocessing import prepare_ann_dataframe
 from src.models.ann.dataset.dataloaders import build_dataloader
 
-class TestModularANNDataset(unittest.TestCase):
+
+class TestModularANNDatasetSynthetic(unittest.TestCase):
     def setUp(self):
-        self.dummy_data = {
-            "timestamp": ["2023-01-01 00:00:00", "2023-01-01 01:00:00", "2023-01-01 02:00:00", "2023-01-01 03:00:00"],
-            "option_price": [100.0, 150.0, 120.0, 110.0],
-            "underlying_price": [15000.0, 16000.0, 17000.0, 18000.0],
-            "time_to_maturity": [0.5, 0.4, 0.3, 0.2],
-            "log_moneyness": [-0.1, 0.0, 0.1, 0.0],
-            "mon_bin": ["ATM", "ATM", "OTM", "OTM"],
-            "ttm_bin": ["1M", "1M", "3M", "3M"]
+        self.test_dir = tempfile.mkdtemp()
+        self.synthetic_data_path = os.path.join(self.test_dir, "synthetic.csv")
+        self.df = pd.DataFrame({
+            "timestamp": [1600000000, 1600003600, 1600007200, 1600010800, 1600014400, 1600018000, 1600021600, 1600025200, 1600028800, 1600032400],
+            "feature_1": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+            "target": [10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+            "mod_a": ["A", "A", "A", "A", "A", "A", "A", "A", "A", "A"],
+            "mod_b": ["B", "B", "B", "B", "B", "B", "B", "B", "B", "B"],
+            "meta_inf": ["info1"] * 10
+        })
+        self.df.to_csv(self.synthetic_data_path, index=False)
+        self.synthetic_config = {
+            "input_path": self.synthetic_data_path,
+            "feature_columns": ["feature_1"],
+            "target_column": "target",
+            "timestamp_column": "timestamp",
+            "module_columns": ["mod_a", "mod_b"],
+            "metadata_columns": ["meta_inf"],
+            "dtype": "float32"
         }
-        self.df = pd.DataFrame(self.dummy_data)
-        
-    def test_missing_column_failure(self):
-        with self.assertRaises(ValueError):
-            # should fail because missing column `missing_col`
-            manager = ModularSplitManager(
-                df=self.df,
-                feature_columns=["time_to_maturity", "missing_col"],
-                target_column="option_price",
-                timestamp_column="timestamp",
-                module_columns=["mon_bin", "ttm_bin"]
-            )
-            
-    def test_dataset_wrapper_creation_and_shapes(self):
-        features = np.array([[0.5, -0.1], [0.4, 0.0]], dtype=np.float32)
-        targets = np.array([[100.0], [150.0]], dtype=np.float32)
-        
-        container = PreparedTabularData(
-            features=features,
-            targets=targets,
-            feature_columns=["time_to_maturity", "log_moneyness"],
-            target_column="option_price",
-            metadata={"timestamp": np.array(["2023-01-01", "2023-01-02"])}
-        )
-        
-        dataset = TabularDatasetWrapper(
-            container=container,
-            return_metadata=False,
-            dtype=torch.float32
-        )
-        
-        self.assertEqual(len(dataset), 2)
-        x, y = dataset[0]
-        self.assertEqual(x.shape, (2,))
-        self.assertEqual(y.shape, (1,))
-        self.assertEqual(x.dtype, torch.float32)
-        
-    def test_split_manager_routing_and_metadata(self):
-        df_clean = self.df.dropna().copy()
+
+    def tearDown(self):
+        shutil.rmtree(self.test_dir)
+
+    def test_synthetic_single_global_module(self):
+        """Test functionality when there is precisely one single global module."""
+        config = self.synthetic_config.copy()
+        config["module_columns"] = []
+        df = prepare_ann_dataframe(config)
         
         manager = ModularSplitManager(
-            df=df_clean,
-            feature_columns=["time_to_maturity"],
-            target_column="option_price",
-            module_columns=["mon_bin", "ttm_bin"],
-            timestamp_column="timestamp",
-            metadata_columns=["underlying_price"]
+            df=df,
+            feature_columns=config["feature_columns"],
+            target_column=config["target_column"],
+            timestamp_column=config["timestamp_column"],
+            module_columns=config["module_columns"],
+            min_module_size=5
         )
         
-        # We expect two modules: ('ATM', '1M') and ('OTM', '3M')
-        self.assertEqual(len(manager.modules), 2)
+        self.assertEqual(len(manager.modules), 1)
+        self.assertIn("global", manager.modules)
         
-        atm_mod = manager.modules["ATM_1M"]
-        self.assertEqual(len(atm_mod.train), 1)  # 2 rows total -> 80% is 1 row
+        diag = manager.get_diagnostics()
+        self.assertEqual(len(diag), 1)
+        self.assertEqual(diag.iloc[0]["status"], "active")
         
-        train_ds, val_ds, test_ds = atm_mod.as_datasets(return_metadata=True)
-        x, y, meta = train_ds[0]
-        
-        self.assertIn("timestamp", meta)
-        self.assertIn("underlying_price", meta)
-        self.assertEqual(meta["timestamp"], "2023-01-01 00:00:00")
-        self.assertEqual(meta["underlying_price"], 15000.0)
+        mod = manager.modules["global"]
+        self.assertEqual(len(mod.train), 8)
+        self.assertEqual(len(mod.val), 1)
+        self.assertEqual(len(mod.test), 1)
 
-    def test_dataloader_batching(self):
-        features = np.array([[0.5], [0.4]], dtype=np.float32)
-        targets = np.array([[100.0], [150.0]], dtype=np.float32)
-        
-        container = PreparedTabularData(
-            features=features,
-            targets=targets,
-            feature_columns=["time_to_maturity"],
-            target_column="option_price",
-            metadata={"timestamp": np.array(["2023-01-01", "2023-01-02"])}
+    def test_synthetic_tiny_module_skipped(self):
+        """Test that a module below the min_module_size threshold is skipped transparently."""
+        df = prepare_ann_dataframe(self.synthetic_config)
+        manager = ModularSplitManager(
+            df=df,
+            feature_columns=self.synthetic_config["feature_columns"],
+            target_column=self.synthetic_config["target_column"],
+            timestamp_column=self.synthetic_config["timestamp_column"],
+            module_columns=self.synthetic_config["module_columns"],
+            min_module_size=15
         )
         
-        dataset = TabularDatasetWrapper(
-            container=container,
-            return_metadata=True,
-            dtype=torch.float32
-        )
+        self.assertEqual(len(manager.modules), 0)
+        diag = manager.get_diagnostics()
+        self.assertEqual(len(diag), 1)
+        self.assertEqual(diag.iloc[0]["status"], "skipped")
+        self.assertIn("min_module_size", diag.iloc[0]["reason"])
+        self.assertEqual(diag.iloc[0]["total_rows"], 10)
+
+    def test_synthetic_missing_timestamps(self):
+        """Test behavior if missing timestamps exist."""
+        bad_ts_path = os.path.join(self.test_dir, "bad_ts.csv")
+        pd.DataFrame({
+            "timestamp": [1, np.nan, 3],
+            "feature_1": [1.0, 2.0, 3.0],
+            "target": [1, 2, 3]
+        }).to_csv(bad_ts_path, index=False)
         
-        loader = build_dataloader(dataset, batch_size=2, shuffle=False)
+        config = {
+            "input_path": bad_ts_path,
+            "feature_columns": ["feature_1"],
+            "target_column": "target",
+            "timestamp_column": "timestamp",
+        }
+        
+        with self.assertRaisesRegex(ValueError, "violates chronological splitting"):
+            prepare_ann_dataframe(config)
+
+    def test_synthetic_missing_feature_values(self):
+        """Test preprocessing correctly handles and drops NaN feature values if configured."""
+        bad_feat_path = os.path.join(self.test_dir, "bad_feat.csv")
+        pd.DataFrame({
+            "timestamp": [1, 2, 3],
+            "feature_1": [1.0, np.nan, 3.0],
+            "target": [1, 2, 3]
+        }).to_csv(bad_feat_path, index=False)
+        
+        config = {
+            "input_path": bad_feat_path,
+            "feature_columns": ["feature_1"],
+            "target_column": "target",
+            "timestamp_column": "timestamp",
+            "drop_na": True
+        }
+        df = prepare_ann_dataframe(config)
+        self.assertEqual(len(df), 2)
+
+    def test_synthetic_non_numeric_features(self):
+        """Test preprocessing raises an error when feature values cannot be cast to numeric."""
+        bad_type_path = os.path.join(self.test_dir, "bad_type.csv")
+        pd.DataFrame({
+            "timestamp": [1, 2],
+            "feature_1": ["A", "B"], 
+            "target": [1, 2]
+        }).to_csv(bad_type_path, index=False)
+        
+        config = {
+            "input_path": bad_type_path,
+            "feature_columns": ["feature_1"],
+            "target_column": "target",
+            "timestamp_column": "timestamp",
+        }
+        with self.assertRaisesRegex(TypeError, "Failed to cast"):
+            prepare_ann_dataframe(config)
+
+    def test_synthetic_empty_split_module(self):
+        """Test a module that is large enough but results in an empty validation or test split due to small dataset side-effects."""
+        empty_split_path = os.path.join(self.test_dir, "empty_split.csv")
+        pd.DataFrame({
+            "timestamp": [1, 2, 3, 4], # Only 4 rows
+            "feature_1": [1.0, 2.0, 3.0, 4.0],
+            "target": [1, 2, 3, 4],
+            "mod_a": ["A", "A", "A", "A"]
+        }).to_csv(empty_split_path, index=False)
+        
+        config = {
+            "input_path": empty_split_path,
+            "feature_columns": ["feature_1"],
+            "target_column": "target",
+            "timestamp_column": "timestamp",
+            "module_columns": ["mod_a"]
+        }
+        df = prepare_ann_dataframe(config)
+        # Even though min size is 4, 10% of 4 is 0.4 -> 0 length test/val
+        manager = ModularSplitManager(
+            df=df,
+            feature_columns=config["feature_columns"],
+            target_column=config["target_column"],
+            timestamp_column=config["timestamp_column"],
+            module_columns=config["module_columns"],
+            min_module_size=4
+        )
+        self.assertEqual(len(manager.modules), 0)
+        diag = manager.get_diagnostics()
+        self.assertEqual(diag.iloc[0]["status"], "skipped")
+        self.assertIn("empty train/val/test split", diag.iloc[0]["reason"])
+
+
+class TestModularANNDatasetRealData(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        path = "data/processed/options_dataset_filtered_v2.csv"
+        if not os.path.exists(path):
+            alt_path = "data/processed/options_dataset_filtered.csv"
+            if os.path.exists(alt_path):
+                path = alt_path
+                
+        cls.config = {
+            "input_path": path,
+            "feature_columns": ["time_to_maturity", "underlying_price", "strike"],
+            "target_column": "option_price",
+            "timestamp_column": "timestamp",
+            "module_columns": [], 
+            "metadata_columns": ["option_type"],
+            "dtype": "float32",
+            "drop_na": True
+        }
+        
+        if os.path.exists(cls.config["input_path"]):
+            sample = pd.read_csv(cls.config["input_path"], nrows=5)
+            mods = []
+            if "mon_bin" in sample.columns: mods.append("mon_bin")
+            if "ttm_bin" in sample.columns: mods.append("ttm_bin")
+            
+            cls.config["module_columns"] = mods
+            cls.df = prepare_ann_dataframe(cls.config)
+            
+            cls.manager = ModularSplitManager(
+                df=cls.df,
+                feature_columns=cls.config["feature_columns"],
+                target_column=cls.config["target_column"],
+                timestamp_column=cls.config["timestamp_column"],
+                module_columns=cls.config["module_columns"],
+                metadata_columns=cls.config["metadata_columns"],
+                min_module_size=100
+            )
+        else:
+            cls.df = None
+            cls.manager = None
+
+    def test_real_data_structural_evaluation(self):
+        if self.manager is None:
+            self.skipTest("Real dataset not found.")
+            
+        diag = self.manager.get_diagnostics()
+        self.assertGreater(len(diag), 0, "No modules evaluated.")
+        
+        active_count = (diag["status"] == "active").sum()
+        self.assertEqual(active_count, len(self.manager.modules), "Diagnostics active count doesn't match modules dictionary")
+        
+        if active_count > 0:
+            active_diag = diag[diag["status"] == "active"].iloc[0]
+            self.assertGreater(active_diag["train_rows"], 0)
+            self.assertGreater(active_diag["val_rows"], 0)
+            self.assertGreater(active_diag["test_rows"], 0)
+
+    def test_real_data_chronological_split_correctness(self):
+        if self.manager is None:
+            self.skipTest("Real dataset not found.")
+        
+        if len(self.manager.modules) == 0:
+            self.skipTest("No active modules to test chronological split correctness.")
+            
+        for mod_name, mod in list(self.manager.modules.items())[:3]: # test first 3 for speed
+            total = len(mod.train) + len(mod.val) + len(mod.test)
+            self.assertLessEqual(abs(len(mod.train) - 0.8 * total), max(3, 0.05 * total), "Train split size is not ~80%")
+            self.assertLessEqual(abs(len(mod.val) - 0.1 * total), max(3, 0.05 * total), "Val split size is not ~10%")
+            
+            max_train_ts = mod.train.metadata["timestamp"].max()
+            min_val_ts   = mod.val.metadata["timestamp"].min()
+            self.assertLessEqual(max_train_ts, min_val_ts, f"Leakage detected in {mod_name}")
+            
+            max_val_ts   = mod.val.metadata["timestamp"].max()
+            min_test_ts  = mod.test.metadata["timestamp"].min()
+            self.assertLessEqual(max_val_ts, min_test_ts, f"Leakage detected in {mod_name}")
+
+            train_ts = mod.train.metadata["timestamp"]
+            is_sorted = np.all(train_ts[:-1] <= train_ts[1:])
+            self.assertTrue(is_sorted, "Train timestamps not ascending")
+
+    def test_real_data_pytorch_dataloader_correctness(self):
+        if self.manager is None:
+            self.skipTest("Real dataset not found.")
+        
+        if len(self.manager.modules) == 0:
+            self.skipTest("No active modules to test PyTorch dataloaders.")
+            
+        first_mod_key = list(self.manager.modules.keys())[0]
+        mod = self.manager.modules[first_mod_key]
+        
+        train_ds, val_ds, test_ds = mod.as_datasets(return_metadata=True)
+        feat_count = len(self.config["feature_columns"])
+        
+        self.assertEqual(len(train_ds), len(mod.train))
+        
+        x, y, m = train_ds[0]
+        self.assertEqual(x.shape, (feat_count,))
+        self.assertEqual(y.shape, (1,))
+        self.assertIn("timestamp", m)
+        
+        loader = build_dataloader(train_ds, batch_size=32, shuffle=True)
         batch = next(iter(loader))
         
-        self.assertEqual(len(batch), 3)
-        self.assertEqual(batch[0].shape, (2, 1))
-        self.assertEqual(batch[1].shape, (2, 1))
-        self.assertIsInstance(batch[2], tuple)
-        self.assertEqual(len(batch[2]), 2)
-        self.assertEqual(batch[2][0]["timestamp"], "2023-01-01")
+        bx, by, bm = batch
+        batch_actual = bx.size(0)
+        self.assertEqual(bx.shape, (batch_actual, feat_count))
+        self.assertEqual(by.shape, (batch_actual, 1))
+        
+        self.assertIsInstance(bm, tuple)
+        self.assertIn("timestamp", bm[0])
+
+    def test_real_data_diagnostics_quality(self):
+        if self.manager is None:
+            self.skipTest("Real dataset not found.")
+            
+        diag = self.manager.get_diagnostics()
+        self.assertIn("module_id", diag.columns)
+        self.assertIn("status", diag.columns)
+        self.assertIn("total_rows", diag.columns)
+        
+        skipped = diag[diag["status"] == "skipped"]
+        for _, row in skipped.iterrows():
+            self.assertTrue(pd.notna(row["reason"]))
+            self.assertTrue(pd.isna(row["train_start_ts"]) if "train_start_ts" in row else True)
+            self.assertEqual(row["train_rows"], 0)
+            
+        active = diag[diag["status"] == "active"]
+        for _, row in active.iterrows():
+            reason_empty = pd.isna(row["reason"]) or str(row["reason"]) == "" or str(row["reason"]) == "nan"
+            self.assertTrue(reason_empty)
+            self.assertTrue(pd.notna(row["train_start_ts"]) if "train_start_ts" in row else True)
+            self.assertEqual(row["total_rows"], row["train_rows"] + row["val_rows"] + row["test_rows"])
+
 
 if __name__ == "__main__":
     unittest.main()
