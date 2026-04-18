@@ -57,10 +57,16 @@ class ANNPredictPipeline:
         print(f"[PREDICT] split={self.split} | run_dir={self.run_dir} | device={self.device.type}")
         
         # 2. Load data
-        print(f"Loading original data from {input_path} to reconstruct splits...")
-        df = pd.read_csv(input_path)
-        if run_config.get("drop_na", True):
-            df = df.dropna(subset=feature_cols + [target_col])
+        from src.models.ann.dataset.preprocessing import prepare_ann_dataframe
+        print("Loading original data via prepare_ann_dataframe to reconstruct splits...")
+        
+        # Enforce sample size parity from run_config
+        sample_size = run_config.get("sample_size")
+        
+        df = prepare_ann_dataframe(run_config)
+        
+        if sample_size is not None and len(df) > sample_size:
+            df = df.iloc[:sample_size]
             
         # 3. Create modules (must be identical to training)
         split_manager = ModularSplitManager(
@@ -84,10 +90,14 @@ class ANNPredictPipeline:
         print(f"[PREDICT] active_modules={active_count}")
         
         # 4. Predict
+        used_modules = 0
+        missing_modules = 0
+        
         for mod_id, module_split in split_manager.modules.items():
             mod_dir = os.path.join(self.run_dir, mod_id)
             if not os.path.exists(mod_dir):
-                # Silent skip if module wasn't fully trained
+                print(f"[PREDICT_WARNING] Skipping module {mod_id}: Directory not found.")
+                missing_modules += 1
                 continue
                 
             # Pick the split
@@ -96,6 +106,8 @@ class ANNPredictPipeline:
             n_rows = len(target_data.features)
             # Skip if split is empty
             if n_rows == 0:
+                print(f"[PREDICT_WARNING] Skipping module {mod_id}: Zero evaluation rows.")
+                missing_modules += 1
                 continue
                 
             print(f"[MODULE] {mod_id} | rows={n_rows}")
@@ -119,9 +131,13 @@ class ANNPredictPipeline:
             
             ckpt_path = os.path.join(mod_dir, "checkpoint.pt")
             if not os.path.exists(ckpt_path):
+                print(f"[PREDICT_WARNING] Skipping module {mod_id}: Checkpoint missing.")
+                missing_modules += 1
                 continue
             model.load_state_dict(torch.load(ckpt_path, map_location=self.device, weights_only=True))
             model.to(self.device).eval()
+            
+            used_modules += 1
             
             # Inference
             y_trues = []
@@ -162,6 +178,8 @@ class ANNPredictPipeline:
             preds_df["predicted_price"] = y_preds.flatten()
             all_preds.append(preds_df)
 
+        print(f"[PREDICT] Predictions generated for {used_modules} modules. ({missing_modules} modules skipped).")
+        
         # 5. Export
         if not all_preds:
             print("[PREDICT] No predictions generated. Were any models successfully trained?")

@@ -41,15 +41,14 @@ class ANNTrainPipeline:
         print(f"[RUN] ann_train | run_name={self.run_name} | seed={self.seed} | device={self.device.type}")
         
         # 2. Data load
-        print(f"Loading data from {self.input_path}...")
-        df = pd.read_csv(self.input_path)
+        from src.models.ann.dataset.preprocessing import prepare_ann_dataframe
+        print("Loading data via prepare_ann_dataframe...")
+        df = prepare_ann_dataframe(self.config)
         
         sample_size = self.config.get("sample_size")
         if sample_size is not None and len(df) > sample_size:
             df = df.iloc[:sample_size]
             
-        if self.config.get("drop_na", True):
-            df = df.dropna(subset=self.feature_cols + [self.target_col])
         print(f"[DATA] rows={len(df)}")
         
         # 3. Create modules
@@ -131,4 +130,18 @@ class ANNTrainPipeline:
                 
         # Save diagnostics
         diagnostics.to_csv(os.path.join(self.output_dir, "diagnostics.csv"), index=False)
+        
+        # Save run summary
+        run_summary = {
+            "run_name": self.run_name,
+            "seed": self.seed,
+            "device": self.device.type,
+            "active_modules": active_count,
+            "skipped_modules": skipped_count,
+            "total_rows_processed": len(df),
+            "scaling_enabled": self.config.get("scaling", {}).get("enabled", True)
+        }
+        with open(os.path.join(self.output_dir, "run_summary.json"), "w") as f:
+            json.dump(run_summary, f, indent=4)
+            
         print(f"[RUN] ann_train finished successfully.")
