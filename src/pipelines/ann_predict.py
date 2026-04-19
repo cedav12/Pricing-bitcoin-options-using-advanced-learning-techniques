@@ -64,7 +64,7 @@ class ANNPredictPipeline:
         sample_size = run_config.get("sample_size")
         
         df = prepare_ann_dataframe(run_config)
-        
+            
         if sample_size is not None and len(df) > sample_size:
             df = df.iloc[:sample_size]
             
@@ -174,8 +174,10 @@ class ANNPredictPipeline:
                 
             preds_df = pd.DataFrame(flat_metas)
             preds_df["module_id"] = mod_id
+            
             preds_df["actual_price"] = y_trues.flatten()
             preds_df["predicted_price"] = y_preds.flatten()
+                
             all_preds.append(preds_df)
 
         print(f"[PREDICT] Predictions generated for {used_modules} modules. ({missing_modules} modules skipped).")
