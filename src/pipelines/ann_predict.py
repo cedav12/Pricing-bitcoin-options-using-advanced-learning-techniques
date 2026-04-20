@@ -52,6 +52,10 @@ class ANNPredictPipeline:
         time_col = run_config.get("timestamp_column", "timestamp")
         module_cols = run_config.get("module_columns", [])
         meta_cols = run_config.get("metadata_columns", [])
+        for mc in ["strike", "underlying_price", "option_type", "expiry"]:
+            if mc not in meta_cols:
+                meta_cols.append(mc)
+                
         min_module_size = run_config.get("min_module_size", 100)
         
         print(f"[PREDICT] split={self.split} | run_dir={self.run_dir} | device={self.device.type}")

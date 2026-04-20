@@ -16,12 +16,16 @@ class ANNTrainPipeline:
         self.run_name = config.get("run_name", "ann_v1_modular")
         self.output_dir = os.path.join("output", "ann", self.run_name)
         
-        self.input_path = config.get("input_path", "data/processed/options_dataset_filtered.csv")
+        self.input_path = config.get("input_path", "data/processed/options_dataset_filtered_v2.csv")
         self.feature_cols = config.get("feature_columns", [])
         self.target_col = config.get("target_column", "option_price")
         self.time_col = config.get("timestamp_column", "timestamp")
         self.module_cols = config.get("module_columns", [])
         self.meta_cols = config.get("metadata_columns", [])
+        for mc in ["strike", "underlying_price", "option_type", "expiry"]:
+            if mc not in self.meta_cols:
+                self.meta_cols.append(mc)
+                
         self.min_module_size = config.get("min_module_size", 100)
         
         rt = config.get("runtime", {})

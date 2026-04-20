@@ -113,6 +113,7 @@ def main():
     # ── evaluate_model ───────────────────────────────────────────────────────
     elif args.mode == "evaluate_model":
         input_val = get_val(mode_config, "input", "data/processed/predictions_bs.csv")
+        input_val = get_val(mode_config, "input", "data/processed/predictions_bs.csv")
         opt_filter_val = get_val(mode_config, "option_filter", "call")
         error_val = get_val(mode_config, "error_type", "relative")
         eval_mode_val = get_val(mode_config, "evaluation_mode", "stable")

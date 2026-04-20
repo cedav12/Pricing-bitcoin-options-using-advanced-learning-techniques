@@ -72,11 +72,11 @@ class Trainer:
             best_str = "yes" if is_best else "no"
             
             print(f"[TRAIN] module={self.module_id} | epoch={epoch}/{self.epochs} | "
-                  f"train_loss={train_loss:.5f} | val_loss={val_loss:.5f} | lr={lr_current:.6f} | best={best_str}")
+                  f"train_loss={train_loss:.8f} | val_loss={val_loss:.8f} | lr={lr_current:.6f} | best={best_str}")
             
             if patience_counter >= self.patience:
                 print(f"[EARLY_STOP] module={self.module_id} | stopped_epoch={epoch} | "
-                      f"best_epoch={best_epoch} | best_val_loss={best_val_loss:.5f}")
+                      f"best_epoch={best_epoch} | best_val_loss={best_val_loss:.8f}")
                 break
                 
         print(f"[SAVE] module={self.module_id} | checkpoint={target_checkpoint_path}")
