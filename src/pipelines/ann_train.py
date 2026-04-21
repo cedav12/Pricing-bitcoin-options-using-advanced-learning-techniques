@@ -22,7 +22,7 @@ class ANNTrainPipeline:
         self.time_col = config.get("timestamp_column", "timestamp")
         self.module_cols = config.get("module_columns", [])
         self.meta_cols = config.get("metadata_columns", [])
-        for mc in ["strike", "underlying_price", "option_type", "expiry"]:
+        for mc in ["strike", "underlying_price", "option_type", "expiry"] + self.module_cols:
             if mc not in self.meta_cols:
                 self.meta_cols.append(mc)
                 

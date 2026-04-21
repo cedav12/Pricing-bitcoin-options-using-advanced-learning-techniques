@@ -52,9 +52,11 @@ class ANNPredictPipeline:
         time_col = run_config.get("timestamp_column", "timestamp")
         module_cols = run_config.get("module_columns", [])
         meta_cols = run_config.get("metadata_columns", [])
-        for mc in ["strike", "underlying_price", "option_type", "expiry"]:
+        for mc in ["strike", "underlying_price", "option_type", "expiry"] + module_cols:
             if mc not in meta_cols:
                 meta_cols.append(mc)
+
+        run_config["metadata_columns"] = meta_cols
                 
         min_module_size = run_config.get("min_module_size", 100)
         
