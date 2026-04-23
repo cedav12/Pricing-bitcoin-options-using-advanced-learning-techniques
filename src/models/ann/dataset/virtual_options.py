@@ -57,13 +57,19 @@ def _btc_intrinsic_payoff(
     option_type: np.ndarray,   # array of strings
 ) -> np.ndarray:
     """
-    Compute the maturity intrinsic payoff in BTC (the current project convention).
+    Compute the maturity intrinsic payoff in BTC (the current project convention)
+    and quantize it to the exchange-valid BTC inverse option tick grid.
 
     BTC-quoted inverse options:
         call payoff = max(S - K, 0) / S   [in BTC]
         put  payoff = max(K - S, 0) / S   [in BTC]
 
-    Both clipped to >= 0.
+    Exchange tick-size rule for BTC inverse options:
+        - 0.0001 BTC for price < 0.0050 BTC
+        - 0.0005 BTC for price >= 0.0050 BTC
+
+    Quantization policy:
+        round to nearest valid tick.
     """
     S = underlying.astype(np.float64)
     K = strike.astype(np.float64)
@@ -74,7 +80,22 @@ def _btc_intrinsic_payoff(
         np.maximum(S - K, 0.0) / S,
         np.maximum(K - S, 0.0) / S,
     )
-    return payoff.astype(np.float32)
+
+    # Exchange-consistent quantization to valid BTC option price increments
+    small_tick_mask = payoff < 0.0050
+
+    payoff_quantized = payoff.copy()
+    payoff_quantized[small_tick_mask] = (
+            np.round(payoff_quantized[small_tick_mask] / 0.0001) * 0.0001
+    )
+    payoff_quantized[~small_tick_mask] = (
+            np.round(payoff_quantized[~small_tick_mask] / 0.0005) * 0.0005
+    )
+
+    # Numerical safety: keep non-negative after quantization
+    payoff_quantized = np.maximum(payoff_quantized, 0.0)
+
+    return payoff_quantized.astype(np.float32)
 
 
 # ─── Core augmentation ────────────────────────────────────────────────────────
