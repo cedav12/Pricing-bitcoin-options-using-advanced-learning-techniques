@@ -7,6 +7,7 @@ from typing import Dict, Any
 from src.models.ann.dataset.split_manager import ModularSplitManager
 from src.models.ann.dataset.dataloaders import build_dataloader
 from src.models.ann.dataset.scaling import FeatureScaler
+from src.models.ann.dataset.virtual_options import apply_virtual_options
 from src.models.ann.models.mlp import create_model_from_config
 from src.models.ann.training.trainer import Trainer
 
@@ -25,7 +26,9 @@ class ANNTrainPipeline:
         for mc in ["strike", "underlying_price", "option_type", "expiry"] + self.module_cols:
             if mc not in self.meta_cols:
                 self.meta_cols.append(mc)
-                
+        # Write enriched list back so prepare_ann_dataframe sees it deterministically
+        self.config["metadata_columns"] = self.meta_cols
+
         self.min_module_size = config.get("min_module_size", 100)
         
         rt = config.get("runtime", {})
@@ -79,6 +82,15 @@ class ANNTrainPipeline:
         train_config = self.config.get("training", {})
         batch_size = train_config.get("batch_size", 256)
         
+        vo_config = self.config.get("virtual_options", {"enabled": False})
+        vo_enabled = vo_config.get("enabled", False)
+        if vo_enabled:
+            print(f"[VO] Virtual options ENABLED | type={vo_config.get('type','ttm_zero')} "
+                  f"| count_mode={vo_config.get('count_mode','ratio')} "
+                  f"| count_value={vo_config.get('count_value',0.25)}")
+        
+        vo_diagnostics = []
+        
         # 4. Iterate over active modules
         for idx, (mod_id, module_split) in enumerate(split_manager.modules.items(), 1):
             mod_dir = os.path.join(self.output_dir, mod_id)
@@ -88,7 +100,22 @@ class ANNTrainPipeline:
             n_val = len(module_split.val.features)
             n_test = len(module_split.test.features)
             n_feat = len(self.feature_cols)
-            print(f"[MODULE] {idx}/{active_count} | module={mod_id} | train={n_train} | val={n_val} | test={n_test} | features={n_feat}")
+            
+            # 4a. Virtual options augmentation (train only, before scaling)
+            vo_diag = apply_virtual_options(
+                module_split=module_split,
+                vo_config=vo_config,
+                module_id=mod_id,
+                base_seed=self.seed,
+            )
+            vo_diagnostics.append(vo_diag)
+            if vo_diag["augmentation_applied"]:
+                print(f"[VO] module={mod_id} | real_train={vo_diag['n_real_train']} "
+                      f"| virtual_added={vo_diag['n_virtual_added']} "
+                      f"| augmented_train={vo_diag['n_augmented_train']}")
+            
+            n_train_final = len(module_split.train.features)
+            print(f"[MODULE] {idx}/{active_count} | module={mod_id} | train={n_train_final}(+{n_train_final - n_train} vo) | val={n_val} | test={n_test} | features={n_feat}")
             
             # Scale
             if self.config.get("scaling", {}).get("enabled", True):
@@ -135,6 +162,12 @@ class ANNTrainPipeline:
         # Save diagnostics
         diagnostics.to_csv(os.path.join(self.output_dir, "diagnostics.csv"), index=False)
         
+        # Save virtual options diagnostics
+        if vo_diagnostics:
+            pd.DataFrame(vo_diagnostics).to_csv(
+                os.path.join(self.output_dir, "virtual_options_diagnostics.csv"), index=False
+            )
+        
         # Save run summary
         run_summary = {
             "run_name": self.run_name,
@@ -143,7 +176,11 @@ class ANNTrainPipeline:
             "active_modules": active_count,
             "skipped_modules": skipped_count,
             "total_rows_processed": len(df),
-            "scaling_enabled": self.config.get("scaling", {}).get("enabled", True)
+            "scaling_enabled": self.config.get("scaling", {}).get("enabled", True),
+            "virtual_options_enabled": vo_enabled,
+            "virtual_options_type": vo_config.get("type") if vo_enabled else None,
+            "virtual_options_count_mode": vo_config.get("count_mode") if vo_enabled else None,
+            "virtual_options_count_value": vo_config.get("count_value") if vo_enabled else None,
         }
         with open(os.path.join(self.output_dir, "run_summary.json"), "w") as f:
             json.dump(run_summary, f, indent=4)

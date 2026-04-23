@@ -102,18 +102,23 @@ class BlackScholesPipeline:
 
             # 3. Format Output Schema
             out_df = pd.DataFrame()
-            out_df["timestamp"] = chunk["timestamp"]
-            out_df["option_type"] = chunk["option_type"]
-            out_df["strike"] = chunk["strike"]
+            # -- join keys (required for ANN vs BS comparison) --
+            out_df["timestamp"]        = chunk["timestamp"]
+            out_df["strike"]           = chunk["strike"]
+            out_df["expiry"]           = chunk["expiry"] if "expiry" in chunk.columns else pd.NA
+            out_df["option_type"]      = chunk["option_type"]
+            # -- additional context columns --
             out_df["underlying_price"] = chunk["underlying_price"]
             out_df["time_to_maturity"] = chunk["time_to_maturity"]
-            out_df["log_moneyness"] = chunk["log_moneyness"]
-            out_df["time_value"] = chunk["time_value"]
-            out_df["intrinsic_value"] = chunk["intrinsic_value"]
-            
+            out_df["risk_free_rate"]   = chunk["risk_free_rate"]
+            out_df["volatility_used"]  = chunk[vol_column]
+            out_df["log_moneyness"]    = chunk["log_moneyness"]
+            out_df["intrinsic_value"]  = chunk["intrinsic_value"]
+            out_df["time_value"]       = chunk["time_value"]
+            # -- prediction columns --
             out_df["market_price"] = chunk["option_price"]
-            out_df["model_price"] = model_price_btc
-            out_df["model_name"] = "black_scholes"
+            out_df["model_price"]  = model_price_btc
+            out_df["model_name"]   = "black_scholes"
             out_df["pricing_error"] = out_df["model_price"] - out_df["market_price"]
 
             # 4. Incremental Save
@@ -128,5 +133,16 @@ class BlackScholesPipeline:
 
         if loaded_total > 0:
             print(f"\n[BS Pipeline] Completed. Saved {loaded_total:,} predictions to '{output_path}'.")
+            # Validation summary for join-key integrity
+            sample = pd.read_csv(output_path, nrows=5)
+            join_keys = ["timestamp", "strike", "expiry", "option_type"]
+            present   = [k for k in join_keys if k in sample.columns]
+            missing   = [k for k in join_keys if k not in sample.columns]
+            print(f"[BS Pipeline] Join keys present : {present}")
+            if missing:
+                print(f"[BS Pipeline] Join keys MISSING : {missing}  <-- comparison may fail")
+            print(f"[BS Pipeline] Output columns    : {list(sample.columns)}")
+            print(f"[BS Pipeline] Sample rows:")
+            print(sample[["timestamp", "strike", "expiry", "option_type", "model_price", "market_price"]].to_string(index=False))
         else:
             print("\n[BS Pipeline] No valid rows to process.")
